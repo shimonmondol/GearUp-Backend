@@ -82,6 +82,7 @@ model GearItem {
   providerId    String
   categoryId    String
   title         String
+  images        String[]
   description   String
   brand         String
   pricePerDay   Float

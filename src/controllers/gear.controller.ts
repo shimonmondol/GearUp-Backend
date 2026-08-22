@@ -58,8 +58,19 @@ export const createGear = async (req: Request, res: Response) => {
   const validatedData = gearSchema.parse(req.body || {});
   const user = (req as any).user;
 
+  const { categoryId, ...rest } = validatedData as any;
+
   const gear = await prisma.gearItem.create({
-    data: { ...validatedData, providerId: user.id },
+    data: {
+      ...rest,
+      providerId: user.id,
+      ...(categoryId && {
+        category: {
+          connect: { id: categoryId },
+        },
+      }),
+    },
+    include: { category: true },
   });
 
   res.status(201).json({
@@ -69,7 +80,7 @@ export const createGear = async (req: Request, res: Response) => {
   });
 };
 
-// 4. Update Gear
+// 4. Update Gear (Fixed categoryId Prisma Relation)
 export const updateGear = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;
@@ -89,11 +100,22 @@ export const updateGear = async (req: Request, res: Response) => {
     throw new AppError(403, "Unauthorized");
   }
 
+  // categoryId আলাদা করে প্রিজমা রিলেশন সেট করা
+  const { categoryId, category, ...restData } = req.body;
+
   const updated = await prisma.gearItem.update({
     where: {
       id: String(id),
     },
-    data: req.body,
+    data: {
+      ...restData,
+      ...(categoryId && {
+        category: {
+          connect: { id: categoryId },
+        },
+      }),
+    },
+    include: { category: true },
   });
 
   res.json({
