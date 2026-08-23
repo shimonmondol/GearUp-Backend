@@ -9,8 +9,6 @@ import orderRouter from "./routes/order.route";
 import rentalRoutes from "./routes/rental.routes";
 import reviewRouter from "./routes/review.route";
 import paymentRouter from "./routes/payment.routes";
-
-
 import { globalErrorHandler } from "./middlewares/error.middleware";
 
 dotenv.config();
