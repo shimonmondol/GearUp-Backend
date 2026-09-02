@@ -82,7 +82,7 @@ model GearItem {
   providerId    String
   categoryId    String
   title         String
-  images        String[]
+  images        String[] @default(["https://placehold.co/600x400?text=No+Image"])
   description   String
   brand         String
   pricePerDay   Float
