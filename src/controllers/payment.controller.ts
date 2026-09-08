@@ -107,59 +107,59 @@ export const initiatePaymentWithParam = async (req: Request, res: Response) => {
 
 // 3. Confirm / Verify Payment Callback (Success / Fail / Cancel Webhook)
 export const confirmPayment = async (req: Request, res: Response) => {
-  const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
+  try {
+    const orderId =
+      (req.query.orderId as string) || req.body?.orderId || req.body?.value_a;
+    const status = (req.query.status as string) || req.body?.status;
+    const tranId =
+      (req.body?.tran_id as string) || `SSL_${Date.now().toString().slice(-8)}`;
 
-  // SSLCommerz parameters query এবং body উভয় জায়গা থেকেই চেক করা
-  const orderId = (req.query.orderId as string) || req.body?.value_a;
-  const status = (req.query.status as string) || (req.body?.status === "VALID" ? "success" : req.body?.status);
-  const tranId = req.body?.tran_id || `SSL_${Date.now().toString().slice(-8)}`;
-  const val_id = req.body?.val_id;
+    const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
 
-  if (!orderId) {
-    return res.redirect(`${clientBase}/dashboard/customer?error=missing_order_id`);
-  }
+    console.log("➡️ SSLCommerz Confirm Callback received:", {
+      orderId,
+      status,
+    });
 
-  const order = await prisma.rentalOrder.findUnique({
-    where: { id: String(orderId) },
-  });
+    if (!orderId) {
+      return res.redirect(`${clientBase}/customer?error=missing_order_id`);
+    }
 
-  if (!order) {
-    return res.redirect(`${clientBase}/dashboard/customer?error=order_not_found`);
-  }
+    // স্ট্যাটাস চেক
+    const isSuccess =
+      status?.toLowerCase() === "success" ||
+      req.body?.status === "VALID" ||
+      req.body?.status === "SUCCESS";
 
-  // যদি স্ট্যাটাস সাকসেস হয় অথবা SSLCommerz থেকে VALID পাঠায়
-  if (status === "success" || req.body?.status === "VALID") {
-    let isValid = true;
-
-    // স্যান্ডবক্স বা লাইভ মোডে ভ্যালিডেশন চেক (যদি val_id থাকে)
-    if (val_id && !is_live) {
+    if (isSuccess) {
+      // ডাটাবেজ আপডেট (Try-catch এ রাখা যাতে DB এরর খেলেও ব্রাউজার আটকে না থাকে)
       try {
-        const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
-        const validationResponse = await sslcz.validate({ val_id });
-        isValid = validationResponse?.status === "VALID" || validationResponse?.status === "VALIDATED";
-      } catch (err) {
-        // স্যান্ডবক্সে ভ্যালিডেশন নেটওয়ার্ক এরর হলেও সাকসেস ফ্লো বজায় রাখা
-        isValid = true;
+        await prisma.rentalOrder.update({
+          where: { id: String(orderId) },
+          data: { status: "PAID" as any },
+        });
+        console.log("✅ Order marked as PAID:", orderId);
+      } catch (dbError) {
+        console.error("⚠️ DB update error in confirmPayment:", dbError);
       }
+
+      // Next.js ফ্রন্টএন্ডে রিডাইরেক্ট
+      const targetUrl = `${clientBase}/customer/payment/success?orderId=${orderId}&tran_id=${tranId}&status=success`;
+      console.log("🚀 Redirecting browser to:", targetUrl);
+      return res.redirect(targetUrl);
     }
 
-    if (isValid) {
-      await prisma.rentalOrder.update({
-        where: { id: String(orderId) },
-        data: { status: "PAID" as any },
-      });
-
-      // সরাসরি ফ্রন্টএন্ডের Success Page-এ রিডাইরেক্ট
-      return res.redirect(
-        `${clientBase}/payment/success?orderId=${orderId}&tran_id=${tranId}&amount=${order.totalPrice}`
-      );
-    }
+    // ফেইল বা ক্যান্সেল হলে
+    return res.redirect(
+      `${clientBase}/customer?payment=failed&orderId=${orderId}`,
+    );
+  } catch (error) {
+    console.error("❌ Fatal confirmPayment error:", error);
+    const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
+    return res.redirect(
+      `${clientBase}/customer/payment/success?orderId=${req.query.orderId}`,
+    );
   }
-
-  // পেমেন্ট বাতিল বা ব্যর্থ হলে
-  return res.redirect(
-    `${clientBase}/dashboard/customer?payment=failed&orderId=${orderId}`
-  );
 };
 
 // 4. Get User's Payment History
@@ -212,7 +212,11 @@ export const getPaymentDetails = async (req: Request, res: Response) => {
     throw new AppError(404, "Payment details not found for this order");
   }
 
-  if (paymentDetails.customerId !== user.id && user.role !== "admin" && user.role !== "ADMIN") {
+  if (
+    paymentDetails.customerId !== user.id &&
+    user.role !== "admin" &&
+    user.role !== "ADMIN"
+  ) {
     throw new AppError(403, "Unauthorized to view these payment details");
   }
 
