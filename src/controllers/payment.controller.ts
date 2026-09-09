@@ -107,58 +107,61 @@ export const initiatePaymentWithParam = async (req: Request, res: Response) => {
 
 // 3. Confirm / Verify Payment Callback (Success / Fail / Cancel Webhook)
 export const confirmPayment = async (req: Request, res: Response) => {
+  const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
+
   try {
     const orderId =
       (req.query.orderId as string) || req.body?.orderId || req.body?.value_a;
     const status = (req.query.status as string) || req.body?.status;
     const tranId =
-      (req.body?.tran_id as string) || `SSL_${Date.now().toString().slice(-8)}`;
-
-    const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
+      (req.body?.val_id as string) ||
+      (req.body?.tran_id as string) ||
+      `SSL_${Date.now().toString().slice(-8)}`;
 
     console.log("➡️ SSLCommerz Confirm Callback received:", {
       orderId,
       status,
+      bodyStatus: req.body?.status,
     });
 
     if (!orderId) {
       return res.redirect(`${clientBase}/customer?error=missing_order_id`);
     }
 
-    // স্ট্যাটাস চেক
+    // SSLCommerz ভ্যালিডেশন চেক
     const isSuccess =
       status?.toLowerCase() === "success" ||
       req.body?.status === "VALID" ||
+      req.body?.status === "VALIDATED" ||
       req.body?.status === "SUCCESS";
 
     if (isSuccess) {
-      // ডাটাবেজ আপডেট (Try-catch এ রাখা যাতে DB এরর খেলেও ব্রাউজার আটকে না থাকে)
+      // ১. ডাটাবেসে অর্ডারের স্ট্যাটাস 'PAID' করা
       try {
         await prisma.rentalOrder.update({
           where: { id: String(orderId) },
-          data: { status: "PAID" as any },
+          data: {
+            status: "PAID" as any,
+          },
         });
         console.log("✅ Order marked as PAID:", orderId);
       } catch (dbError) {
         console.error("⚠️ DB update error in confirmPayment:", dbError);
       }
 
-      // Next.js ফ্রন্টএন্ডে রিডাইরেক্ট
-      const targetUrl = `${clientBase}/customer/payment/success?orderId=${orderId}&tran_id=${tranId}&status=success`;
+      // ২. ফ্রন্টএন্ডের ডেডিকেটেড সাকসেস পেজে রিডাইরেক্ট
+      const targetUrl = `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`;
       console.log("🚀 Redirecting browser to:", targetUrl);
       return res.redirect(targetUrl);
     }
 
-    // ফেইল বা ক্যান্সেল হলে
+    // পেমেন্ট ফেইল অথবা ক্যান্সেল হলে
     return res.redirect(
       `${clientBase}/customer?payment=failed&orderId=${orderId}`,
     );
   } catch (error) {
     console.error("❌ Fatal confirmPayment error:", error);
-    const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
-    return res.redirect(
-      `${clientBase}/customer/payment/success?orderId=${req.query.orderId}`,
-    );
+    return res.redirect(`${clientBase}/customer?payment=error`);
   }
 };
 
