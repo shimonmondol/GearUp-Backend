@@ -16,9 +16,11 @@ const initSSLCommerzSession = async (order: any, user: any) => {
     total_amount: Number(order.totalPrice),
     currency: "BDT",
     tran_id: tran_id,
+    // সফল হলে success স্টেটাস
     success_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=success`,
-    fail_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=fail`,
-    cancel_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=cancel`,
+    // ফেইল বা ক্যান্সেল দুটোতেই failed স্টেটাস
+    fail_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=failed`,
+    cancel_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=failed`,
     ipn_url: `${serverBase}/api/payments/confirm?orderId=${order.id}`,
     shipping_method: "NO",
     product_name: `Rental Order #${order.id.slice(0, 8)}`,
@@ -42,7 +44,7 @@ const initSSLCommerzSession = async (order: any, user: any) => {
 
   return {
     paymentUrl: sslResponse.GatewayPageURL,
-    gatewayUrl: sslResponse.GatewayPageURL, // Frontend compatibility
+    gatewayUrl: sslResponse.GatewayPageURL,
     transactionId: tran_id,
   };
 };
@@ -105,9 +107,9 @@ export const initiatePaymentWithParam = async (req: Request, res: Response) => {
   });
 };
 
-// 3. Confirm / Verify Payment Callback (Success / Fail / Cancel Webhook)
+// 3. Confirm / Verify Payment Callback (শুধুমাত্র Success এবং Failed)
 export const confirmPayment = async (req: Request, res: Response) => {
-  const clientBase = process.env.CLIENT_BASE_URL || "http://localhost:3000";
+  const clientBase = process.env.CLIENT_BASE_URL || "https://gear-up-beta.vercel.app";
 
   try {
     const orderId =
@@ -125,10 +127,10 @@ export const confirmPayment = async (req: Request, res: Response) => {
     });
 
     if (!orderId) {
-      return res.redirect(`${clientBase}/customer?error=missing_order_id`);
+      return res.redirect(`${clientBase}/payment/failed?message=missing_order_id`);
     }
 
-    // SSLCommerz ভ্যালিডেশন চেক
+    // SSLCommerz সাকসেস ভ্যালিডেশন
     const isSuccess =
       status?.toLowerCase() === "success" ||
       req.body?.status === "VALID" ||
@@ -136,35 +138,32 @@ export const confirmPayment = async (req: Request, res: Response) => {
       req.body?.status === "SUCCESS";
 
     if (isSuccess) {
-      // ১. ডাটাবেসে অর্ডারের স্ট্যাটাস 'PAID' করা
       try {
         await prisma.rentalOrder.update({
           where: { id: String(orderId) },
-          data: {
-            status: "PAID" as any,
-          },
+          data: { status: "PAID" as any },
         });
         console.log("✅ Order marked as PAID:", orderId);
       } catch (dbError) {
         console.error("⚠️ DB update error in confirmPayment:", dbError);
       }
 
-      // ২. ফ্রন্টএন্ডের ডেডিকেটেড সাকসেস পেজে রিডাইরেক্ট
-      const targetUrl = `${clientBase}/dashboard/customer?payment=success?orderId=${orderId}&tranId=${tranId}&status=success`;
-      return res.redirect(targetUrl);
+      // ✅ ১. শুধুমাত্র Success পেজে যাবে
+      return res.redirect(
+        `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`
+      );
     }
 
-    // পেমেন্ট ফেইল অথবা ক্যান্সেল হলে
+    // ❌ ২. বাকি সব ক্ষেত্রে (Fail / Cancel) শুধুমাত্র Failed পেজে যাবে
     return res.redirect(
-      `${clientBase}/payment/failed?orderId=${orderId}&status=failed`,
+      `${clientBase}/payment/failed?orderId=${orderId}&status=failed`
     );
   } catch (error) {
     console.error("❌ Fatal confirmPayment error:", error);
-    const clientBase = process.env.CLIENT_BASE_URL || "https://gear-up-beta.vercel.app";
     const fallbackOrderId =
       (req.query.orderId as string) || req.body?.orderId || "";
-      return res.redirect(
-      `${clientBase}/payment/failed?orderId=${fallbackOrderId}&status=error&message=Something+went+wrong+during+payment+processing`,
+    return res.redirect(
+      `${clientBase}/payment/failed?orderId=${fallbackOrderId}&status=failed`
     );
   }
 };
