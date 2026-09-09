@@ -156,11 +156,16 @@ export const confirmPayment = async (req: Request, res: Response) => {
 
     // পেমেন্ট ফেইল অথবা ক্যান্সেল হলে
     return res.redirect(
-      `${clientBase}/customer?payment=failed&orderId=${orderId}`,
+      `${clientBase}/payment/failed?orderId=${orderId}&status=failed`,
     );
   } catch (error) {
     console.error("❌ Fatal confirmPayment error:", error);
-    return res.redirect(`${clientBase}/customer?payment=error`);
+    const clientBase = process.env.CLIENT_BASE_URL || "https://gear-up-beta.vercel.app";
+    const fallbackOrderId =
+      (req.query.orderId as string) || req.body?.orderId || "";
+      return res.redirect(
+      `${clientBase}/payment/failed?orderId=${fallbackOrderId}&status=error&message=Something+went+wrong+during+payment+processing`,
+    );
   }
 };
 
