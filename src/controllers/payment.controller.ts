@@ -10,7 +10,10 @@ const is_live = process.env.SSL_IS_LIVE === "true";
 // Helper function: SSLCommerz Session Generator
 const initSSLCommerzSession = async (order: any, user: any) => {
   const tran_id = `TRAN_${order.id.slice(0, 8)}_${Date.now()}`;
-  const serverBase = process.env.SERVER_BASE_URL || "http://localhost:5000";
+  
+  // ব্যাকএন্ড লাইভ URL (ভিজিটর গেটওয়ে থেকে যেখানে রিটার্ন আসবে)
+  const serverBase =
+    process.env.SERVER_BASE_URL || "https://gear-up-beta.vercel.app";
 
   const paymentData = {
     total_amount: Number(order.totalPrice),
@@ -109,7 +112,9 @@ export const initiatePaymentWithParam = async (req: Request, res: Response) => {
 
 // 3. Confirm / Verify Payment Callback (শুধুমাত্র Success এবং Failed)
 export const confirmPayment = async (req: Request, res: Response) => {
-  const clientBase = process.env.CLIENT_BASE_URL || "https://gear-up-beta.vercel.app";
+  // ফ্রন্টএন্ড লাইভ ডোমেইন (ইউজারকে যেখানে রিডাইরেক্ট করে পাঠানো হবে)
+  const clientBase =
+    process.env.CLIENT_BASE_URL || "https://gear-up-frontend-rosy.vercel.app";
 
   try {
     const orderId =
@@ -127,7 +132,10 @@ export const confirmPayment = async (req: Request, res: Response) => {
     });
 
     if (!orderId) {
-      return res.redirect(`${clientBase}/payment/failed?message=missing_order_id`);
+      return res.redirect(
+        303,
+        `${clientBase}/payment/failed?message=missing_order_id`
+      );
     }
 
     // SSLCommerz সাকসেস ভ্যালিডেশন
@@ -148,14 +156,16 @@ export const confirmPayment = async (req: Request, res: Response) => {
         console.error("⚠️ DB update error in confirmPayment:", dbError);
       }
 
-      // ✅ ১. শুধুমাত্র Success পেজে যাবে
+      // ✅ ফ্রন্টএন্ড Success পেজে রিডাইরেক্ট (GET মেথড নিশ্চিত করতে 303 ব্যবহার করা হয়েছে)
       return res.redirect(
+        303,
         `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`
       );
     }
 
-    // ❌ ২. বাকি সব ক্ষেত্রে (Fail / Cancel) শুধুমাত্র Failed পেজে যাবে
+    // ❌ বাকি সব ক্ষেত্রে (Fail / Cancel) ফ্রন্টএন্ড Failed পেজে রিডাইরেক্ট
     return res.redirect(
+      303,
       `${clientBase}/payment/failed?orderId=${orderId}&status=failed`
     );
   } catch (error) {
@@ -163,6 +173,7 @@ export const confirmPayment = async (req: Request, res: Response) => {
     const fallbackOrderId =
       (req.query.orderId as string) || req.body?.orderId || "";
     return res.redirect(
+      303,
       `${clientBase}/payment/failed?orderId=${fallbackOrderId}&status=failed`
     );
   }
