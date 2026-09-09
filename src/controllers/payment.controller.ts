@@ -150,8 +150,7 @@ export const confirmPayment = async (req: Request, res: Response) => {
       }
 
       // ২. ফ্রন্টএন্ডের ডেডিকেটেড সাকসেস পেজে রিডাইরেক্ট
-      const targetUrl = `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`;
-      console.log("🚀 Redirecting browser to:", targetUrl);
+      const targetUrl = `${clientBase}/dashboard/customer?payment=success?orderId=${orderId}&tranId=${tranId}&status=success`;
       return res.redirect(targetUrl);
     }
 
