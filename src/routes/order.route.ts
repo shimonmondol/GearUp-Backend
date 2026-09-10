@@ -3,6 +3,7 @@ import {
   getAllOrders, 
   createOrder, 
   getMyOrders,
+  getProviderOrders,
   updateOrder,
   cancelOrder,
   deleteOrder 
@@ -17,16 +18,19 @@ router.get("/", protect, restrictTo("admin"), getAllOrders);
 // 2. Customer's Own Orders List
 router.get("/my-orders", protect, getMyOrders);
 
-// 3. Create New Order
+// ⚠️ 3. Provider's Incoming Rental Orders (অবশ্যই /:id এর উপরে থাকবে)
+router.get("/provider", protect, restrictTo("provider"), getProviderOrders);
+
+// 4. Create New Order
 router.post("/", protect, createOrder);
 
-// 4. Update Order Details or Status (Customer for pending dates / Admin for status)
+// 5. Update Order Details or Status
 router.patch("/:id", protect, updateOrder);
 
-// 5. Cancel Order (Customer/Admin)
+// 6. Cancel Order
 router.patch("/:id/cancel", protect, cancelOrder);
 
-// 6. Delete Order Permanently (Admin Only or Protected User)
+// 7. Delete Order Permanently
 router.delete("/:id", protect, deleteOrder);
 
 export default router;

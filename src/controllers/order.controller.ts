@@ -116,7 +116,54 @@ export const getMyOrders = async (req: Request, res: Response) => {
   });
 };
 
-// 4. Update Order (Customer updates dates / Admin updates status)
+// 4. For Provider (getProviderOrders - GET /api/orders/provider)
+export const getProviderOrders = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+
+  if (!user?.id) {
+    throw new AppError(401, "Unauthorized! User not identified.");
+  }
+
+  // প্রোভাইডারের gearItem যেসব অর্ডারে আছে সেগুলো খুঁজে আনা
+  const orders = await prisma.rentalOrder.findMany({
+    where: {
+      orderItems: {
+        some: {
+          gear: {
+            providerId: user.id,
+          },
+        },
+      },
+    },
+    include: {
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+        },
+      },
+      orderItems: {
+        include: {
+          gear: true,
+        },
+      },
+      payments: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Provider incoming orders fetched successfully",
+    data: orders,
+  });
+};
+
+// 5. Update Order (Customer updates dates / Admin updates status)
 export const updateOrder = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;
@@ -191,7 +238,7 @@ export const updateOrder = async (req: Request, res: Response) => {
   });
 };
 
-// 5. Cancel Order (Customer or Admin)
+// 6. Cancel Order (Customer or Admin)
 export const cancelOrder = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;
@@ -224,7 +271,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
   });
 };
 
-// 6. Delete Order Permanently
+// 7. Delete Order Permanently
 export const deleteOrder = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;

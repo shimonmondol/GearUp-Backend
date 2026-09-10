@@ -3,7 +3,7 @@ import prisma from "../config/prisma.ts";
 import { gearSchema } from "../validations/auth.validation.ts";
 import { AppError } from "../utils/AppError";
 
-// ইমেজ ক্লিন ও ভ্যালিডেট করার হেল্পার ফাংশন (কোনো ডিফল্ট ইমেজ বসাবে না)
+// ইমেজ ক্লিন ও ভ্যালিডেট করার হেল্পার ফাংশন
 const sanitizeImages = (imagesInput: any): string[] => {
   if (!Array.isArray(imagesInput)) {
     return [];
@@ -13,7 +13,6 @@ const sanitizeImages = (imagesInput: any): string[] => {
     .map((url) => (typeof url === "string" ? url.trim() : ""))
     .filter((url) => {
       if (!url) return false;
-      // আনস্প্ল্যাশ ওয়েবপেজ লিঙ্ক বাতিল করা (সরাসরি ইমেজ লিঙ্ক নয়)
       if (url.includes("unsplash.com/photos/")) return false;
       return true;
     });
@@ -79,7 +78,34 @@ export const getGears = async (req: Request, res: Response) => {
   });
 };
 
-// 2. Get Single Gear by ID
+// 2. Get Logged-in Provider's Own Gears (GET /api/gear/my-gear)
+export const getMyGears = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+
+  if (!user?.id) {
+    throw new AppError(401, "Unauthorized! User ID not found.");
+  }
+
+  const gears = await prisma.gearItem.findMany({
+    where: {
+      providerId: user.id,
+    },
+    include: {
+      category: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  return res.json({
+    success: true,
+    message: "Provider gear items fetched successfully!",
+    data: gears,
+  });
+};
+
+// 3. Get Single Gear by ID
 export const getGearById = async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -110,7 +136,7 @@ export const getGearById = async (req: Request, res: Response) => {
   });
 };
 
-// 3. Create Gear
+// 4. Create Gear
 export const createGear = async (req: Request, res: Response) => {
   const validatedData = gearSchema.parse(req.body || {});
   const user = (req as any).user;
@@ -120,8 +146,6 @@ export const createGear = async (req: Request, res: Response) => {
   }
 
   const { categoryId, images, ...rest } = validatedData as any;
-
-  // পোস্টম্যান থেকে পাঠানো ইমেজ ক্লিন করা (ডিফল্ট কিছু যোগ হবে না)
   const finalImages = sanitizeImages(images);
 
   const gear = await prisma.gearItem.create({
@@ -156,7 +180,7 @@ export const createGear = async (req: Request, res: Response) => {
   });
 };
 
-// 4. Update Gear
+// 5. Update Gear
 export const updateGear = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;
@@ -182,10 +206,8 @@ export const updateGear = async (req: Request, res: Response) => {
   }
 
   const { categoryId, category, images, ...restData } = req.body;
-
   const updatePayload: any = { ...restData };
 
-  // পোস্টম্যান থেকে পাঠানো নতুন ইমেজ সরাসরি সেট হবে
   if (images !== undefined) {
     updatePayload.images = sanitizeImages(images);
   }
@@ -220,7 +242,7 @@ export const updateGear = async (req: Request, res: Response) => {
   });
 };
 
-// 5. Delete Gear (Safe Delete Handling)
+// 6. Delete Gear (Safe Delete Handling)
 export const deleteGear = async (req: Request, res: Response) => {
   const { id } = req.params;
   const user = (req as any).user;

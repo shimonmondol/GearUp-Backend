@@ -3,6 +3,7 @@ import {
   createGear,
   deleteGear,
   getGears,
+  getMyGears,
   updateGear,
   getGearById,
 } from "../controllers/gear.controller";
@@ -11,7 +12,9 @@ import prisma from "../config/prisma";
 
 const router = Router();
 
+// ==========================================
 // Category Routes
+// ==========================================
 router.post("/categories", protect, async (req, res) => {
   try {
     const { name } = req.body;
@@ -50,10 +53,22 @@ router.get("/categories", async (req, res) => {
   }
 });
 
-// Gear CRUD Routes
+// ==========================================
+// Gear Routes
+// ==========================================
+
+// 1. পাবলিক সব গিয়ার
 router.get("/", getGears);
+
+// ⚠️ 2. প্রোভাইডারের নিজস্ব গিয়ার (অবশ্যই /:id এর উপরে থাকতে হবে)
+router.get("/my-gear", protect, restrictTo("provider"), getMyGears);
+
+// 3. ডাইনামিক আইডি রুট (অবশ্যই /my-gear এর নিচে থাকবে)
 router.get("/:id", getGearById);
+
+// 4. গিয়ার তৈরি, আপডেট এবং ডিলিট
 router.post("/", protect, restrictTo("provider"), createGear);
+router.patch("/:id", protect, restrictTo("provider"), updateGear);
 router.put("/:id", protect, restrictTo("provider"), updateGear);
 router.delete("/:id", protect, restrictTo("provider"), deleteGear);
 
