@@ -9,9 +9,9 @@ const is_live = process.env.SSL_IS_LIVE === "true";
 
 // Helper function: SSLCommerz Session Generator
 const initSSLCommerzSession = async (order: any, user: any) => {
-  const tran_id = `TRAN_${order.id.slice(0, 8)}_${Date.now()}`;
-  
-  // ব্যাকএন্ড লাইভ URL (ভিজিটর গেটওয়ে থেকে যেখানে রিটার্ন আসবে)
+  // tran_id এর ভেতর সরাসরি order.id রাখা হয়েছে যেন ফেইল্ড হলে tran_id থেকেও রিকভার করা যায়
+  const tran_id = `GU_${order.id}_${Date.now()}`;
+
   const serverBase =
     process.env.SERVER_BASE_URL || "https://gear-up-beta.vercel.app";
 
@@ -19,12 +19,14 @@ const initSSLCommerzSession = async (order: any, user: any) => {
     total_amount: Number(order.totalPrice),
     currency: "BDT",
     tran_id: tran_id,
-    // সফল হলে success স্টেটাস
     success_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=success`,
-    // ফেইল বা ক্যান্সেল দুটোতেই failed স্টেটাস
     fail_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=failed`,
     cancel_url: `${serverBase}/api/payments/confirm?orderId=${order.id}&status=failed`,
     ipn_url: `${serverBase}/api/payments/confirm?orderId=${order.id}`,
+
+    // SSLCommerz ফেইল বা ক্যানসেল হলেও value_a ফেরত পাঠায়
+    value_a: String(order.id),
+
     shipping_method: "NO",
     product_name: `Rental Order #${order.id.slice(0, 8)}`,
     product_category: "Gear Rental",
@@ -110,73 +112,93 @@ export const initiatePaymentWithParam = async (req: Request, res: Response) => {
   });
 };
 
-// 3. Confirm / Verify Payment Callback (শুধুমাত্র Success এবং Failed)
+// 3. Confirm / Verify Payment Callback (Success ও Failed নির্ভুল হ্যান্ডলিং)
 export const confirmPayment = async (req: Request, res: Response) => {
-  // ফ্রন্টএন্ড লাইভ ডোমেইন (ইউজারকে যেখানে রিডাইরেক্ট করে পাঠানো হবে)
   const clientBase =
     process.env.CLIENT_BASE_URL || "https://gear-up-frontend-rosy.vercel.app";
 
-  try {
-    const orderId =
-      (req.query.orderId as string) || req.body?.orderId || req.body?.value_a;
-    const status = (req.query.status as string) || req.body?.status;
-    const tranId =
-      (req.body?.val_id as string) ||
-      (req.body?.tran_id as string) ||
-      `SSL_${Date.now().toString().slice(-8)}`;
+  const rawTranId =
+    (req.body?.tran_id as string) || (req.query?.tran_id as string) || "";
 
-    console.log("➡️ SSLCommerz Confirm Callback received:", {
-      orderId,
-      status,
-      bodyStatus: req.body?.status,
-    });
-
-    if (!orderId) {
-      return res.redirect(
-        303,
-        `${clientBase}/payment/failed?message=missing_order_id`
-      );
+  // tran_id (GU_<orderId>_<timestamp>) থেকে ফলব্যাক orderId উদ্ধার
+  let extractedOrderIdFromTran = "";
+  if (rawTranId.startsWith("GU_")) {
+    const parts = rawTranId.split("_");
+    if (parts.length >= 3) {
+      extractedOrderIdFromTran = parts.slice(1, -1).join("_");
     }
+  }
 
-    // SSLCommerz সাকসেস ভ্যালিডেশন
-    const isSuccess =
-      status?.toLowerCase() === "success" ||
-      req.body?.status === "VALID" ||
-      req.body?.status === "VALIDATED" ||
-      req.body?.status === "SUCCESS";
+  // সম্ভাব্য সব সোর্স থেকে orderId বের করা
+  const orderId =
+    (req.query.orderId as string) ||
+    req.body?.value_a ||
+    req.body?.orderId ||
+    extractedOrderIdFromTran ||
+    "";
 
-    if (isSuccess) {
-      try {
-        await prisma.rentalOrder.update({
-          where: { id: String(orderId) },
-          data: { status: "PAID" as any },
-        });
-        console.log("✅ Order marked as PAID:", orderId);
-      } catch (dbError) {
-        console.error("⚠️ DB update error in confirmPayment:", dbError);
-      }
+  const queryStatus = (req.query.status as string) || "";
+  const bodyStatus = (req.body?.status as string) || "";
 
-      // ✅ ফ্রন্টএন্ড Success পেজে রিডাইরেক্ট (GET মেথড নিশ্চিত করতে 303 ব্যবহার করা হয়েছে)
-      return res.redirect(
-        303,
-        `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`
-      );
-    }
+  console.log("➡️ [Payment Callback]", {
+    orderId,
+    queryStatus,
+    bodyStatus,
+    tran_id: rawTranId,
+  });
 
-    // ❌ বাকি সব ক্ষেত্রে (Fail / Cancel) ফ্রন্টএন্ড Failed পেজে রিডাইরেক্ট
+  const tranId =
+    (req.body?.val_id as string) ||
+    rawTranId ||
+    `SSL_${Date.now().toString().slice(-8)}`;
+
+  if (!orderId) {
+    console.error("❌ Order ID could not be identified from callback");
     return res.redirect(
       303,
-      `${clientBase}/payment/failed?orderId=${orderId}&status=failed`
-    );
-  } catch (error) {
-    console.error("❌ Fatal confirmPayment error:", error);
-    const fallbackOrderId =
-      (req.query.orderId as string) || req.body?.orderId || "";
-    return res.redirect(
-      303,
-      `${clientBase}/payment/failed?orderId=${fallbackOrderId}&status=failed`
+      `${clientBase}/payment/failed?message=missing_order_id`
     );
   }
+
+  // পেমেন্ট সাকসেস চেক
+  const isSuccess =
+    queryStatus.toLowerCase() === "success" ||
+    bodyStatus === "VALID" ||
+    bodyStatus === "VALIDATED" ||
+    bodyStatus === "SUCCESS";
+
+  if (isSuccess) {
+    try {
+      await prisma.rentalOrder.update({
+        where: { id: String(orderId) },
+        data: { status: "PAID" as any },
+      });
+      console.log("✅ Order updated to PAID in DB:", orderId);
+    } catch (dbError) {
+      console.error("⚠️ DB update error (PAID):", dbError);
+    }
+
+    return res.redirect(
+      303,
+      `${clientBase}/payment/success?orderId=${orderId}&tranId=${tranId}&status=success`
+    );
+  }
+
+  // ❌ ফেইল বা ক্যানসেল হলে ডাটাবেজে CANCELLED স্ট্যাটাস সেট করা
+  try {
+    await prisma.rentalOrder.update({
+      where: { id: String(orderId) },
+      data: { status: "CANCELLED" as any },
+    });
+    console.log("⚠️ Order updated to CANCELLED in DB:", orderId);
+  } catch (dbError) {
+    console.error("❌ DB update error (CANCELLED):", dbError);
+  }
+
+  return res.redirect(
+    303,
+    `${clientBase}/payment/failed?orderId=${orderId}&status=failed`
+  );
 };
 
 // 4. Get User's Payment History
