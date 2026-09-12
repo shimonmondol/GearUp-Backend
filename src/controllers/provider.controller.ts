@@ -38,7 +38,7 @@ export const getProviderOrders = async (req: Request, res: Response) => {
       },
       include: {
         customer: {
-          select: { id: true, name: true, email: true, phone: true },
+          select: { id: true, name: true, email: true },
         },
         orderItems: {
           include: { gear: true },
