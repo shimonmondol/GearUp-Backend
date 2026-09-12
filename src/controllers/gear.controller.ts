@@ -140,28 +140,35 @@ export const getGearById = async (req: Request, res: Response) => {
 export const createGear = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    const providerId = user?.id || user?.userId || user?._id;
 
-    if (!user?.id) {
-      throw new AppError(401, "Unauthorized! User ID not found.");
+    if (!providerId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized! User ID missing." });
     }
 
     const body = { ...req.body };
 
-    // ১. যদি ফ্রন্টএন্ড থেকে category নাম আসে কিন্তু categoryId না আসে:
+    // ১. ফ্রন্টএন্ড থেকে category নাম আসলে সেটির UUID বের করা বা নতুন তৈরি করা
     if (!body.categoryId && body.category) {
       const categoryName = String(body.category).trim();
-      let foundCategory = await prisma.category.findFirst({
+      let foundCat = await prisma.category.findFirst({
         where: {
           OR: [
             { name: { equals: categoryName, mode: "insensitive" } },
-            { slug: { equals: categoryName.toLowerCase().replace(/\s+/g, "-"), mode: "insensitive" } },
+            {
+              slug: {
+                equals: categoryName.toLowerCase().replace(/\s+/g, "-"),
+                mode: "insensitive",
+              },
+            },
           ],
         },
       });
 
-      // ডাটাবেজে ক্যাটাগরি না থাকলে অটো তৈরি করে আইডি নেওয়া হবে
-      if (!foundCategory) {
-        foundCategory = await prisma.category.create({
+      if (!foundCat) {
+        foundCat = await prisma.category.create({
           data: {
             name: categoryName,
             slug: categoryName.toLowerCase().replace(/\s+/g, "-"),
@@ -169,59 +176,48 @@ export const createGear = async (req: Request, res: Response) => {
         });
       }
 
-      body.categoryId = foundCategory.id;
+      // 👈 Zod স্কিমার জন্য categoryId বাধ্যতামূলক ফিল্ড পূরণ করা হলো
+      body.categoryId = foundCat.id;
     }
 
-    // ২. স্কিমার টাইপ ও ভ্যালু সুরক্ষিত করা
-    if (body.pricePerDay !== undefined) {
-      body.pricePerDay = Number(body.pricePerDay);
-    }
-    if (body.stockQuantity !== undefined) {
-      body.stockQuantity = Number(body.stockQuantity);
-    } else {
-      body.stockQuantity = 1;
-    }
-    if (!body.brand) {
-      body.brand = "General";
-    }
+    // ২. সংখ্যা কনভার্ট ও ডিফল্ট মান
+    body.pricePerDay = Number(body.pricePerDay);
+    body.stockQuantity = Number(body.stockQuantity) || 1;
+    body.brand = body.brand ? String(body.brand).trim() : "General";
 
-    // ৩. নিরাপদভাবে Zod ভ্যালিডেশন চালানো
+    // ৩. নিরাপদভাবে ভ্যালিডেশন এবং পরিষ্কার এরর মেসেজ রিটার্ন
     let validatedData: any;
     try {
       validatedData = gearSchema.parse(body);
-    } catch (valErr: any) {
-      // যদি Zod কোনো নির্দিষ্ট ফিল্ডের জন্য আটকে যায়, তবে বিস্তারিত মেসেজ দেবে
+    } catch (zodErr: any) {
+      console.error("❌ Zod Validation Error:", zodErr.errors);
       return res.status(400).json({
         success: false,
-        message: "Validation Error: Please check all required fields",
-        errors: valErr.errors || valErr.message,
+        message: zodErr.errors?.[0]?.message || "Invalid input data",
+        validationDetails: zodErr.errors || zodErr,
       });
     }
 
-    const { categoryId, images, category, ...rest } = validatedData as any;
+    const { categoryId, images, category, ...rest } = validatedData;
     const finalImages = sanitizeImages(images || body.images);
 
     // ৪. Prisma-তে গিয়ার তৈরি করা
     const gear = await prisma.gearItem.create({
       data: {
         ...rest,
-        images: finalImages.length > 0 ? finalImages : ["https://placehold.co/600x400?text=No+Image"],
+        images:
+          finalImages.length > 0
+            ? finalImages
+            : ["https://placehold.co/600x400?text=No+Image"],
         provider: {
-          connect: { id: user.id },
+          connect: { id: String(providerId) },
         },
         category: {
-          connect: { id: categoryId || body.categoryId },
+          connect: { id: String(categoryId || body.categoryId) },
         },
       },
       include: {
         category: true,
-        provider: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
       },
     });
 
@@ -231,10 +227,11 @@ export const createGear = async (req: Request, res: Response) => {
       data: gear,
     });
   } catch (error: any) {
-    console.error("❌ Error in createGear:", error);
-    return res.status(error.statusCode || 500).json({
+    console.error("❌ Prisma or Runtime Error in createGear:", error);
+    return res.status(error.statusCode || 400).json({
       success: false,
-      message: error.message || "Failed to create gear",
+      message: error.message || "Failed to create gear listing",
+      errorDetails: error.meta || null,
     });
   }
 };
