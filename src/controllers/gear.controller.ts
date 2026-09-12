@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import prisma from "../config/prisma.ts";
-import { gearSchema } from "../validations/auth.validation.ts";
+import prisma from "../config/prisma";
+import { gearSchema } from "../validations/auth.validation";
 import { AppError } from "../utils/AppError";
 
 // ইমেজ ক্লিন ও ভ্যালিডেট করার হেল্পার ফাংশন
@@ -136,48 +136,107 @@ export const getGearById = async (req: Request, res: Response) => {
   });
 };
 
-// 4. Create Gear
+// 4. Create Gear (Fixed Validation & Category Auto-resolution)
 export const createGear = async (req: Request, res: Response) => {
-  const validatedData = gearSchema.parse(req.body || {});
-  const user = (req as any).user;
+  try {
+    const user = (req as any).user;
 
-  if (!user?.id) {
-    throw new AppError(401, "Unauthorized! User ID not found.");
-  }
+    if (!user?.id) {
+      throw new AppError(401, "Unauthorized! User ID not found.");
+    }
 
-  const { categoryId, images, ...rest } = validatedData as any;
-  const finalImages = sanitizeImages(images);
+    const body = { ...req.body };
 
-  const gear = await prisma.gearItem.create({
-    data: {
-      ...rest,
-      images: finalImages,
-      provider: {
-        connect: { id: user.id },
-      },
-      ...(categoryId && {
+    // ১. যদি ফ্রন্টএন্ড থেকে category নাম আসে কিন্তু categoryId না আসে:
+    if (!body.categoryId && body.category) {
+      const categoryName = String(body.category).trim();
+      let foundCategory = await prisma.category.findFirst({
+        where: {
+          OR: [
+            { name: { equals: categoryName, mode: "insensitive" } },
+            { slug: { equals: categoryName.toLowerCase().replace(/\s+/g, "-"), mode: "insensitive" } },
+          ],
+        },
+      });
+
+      // ডাটাবেজে ক্যাটাগরি না থাকলে অটো তৈরি করে আইডি নেওয়া হবে
+      if (!foundCategory) {
+        foundCategory = await prisma.category.create({
+          data: {
+            name: categoryName,
+            slug: categoryName.toLowerCase().replace(/\s+/g, "-"),
+          },
+        });
+      }
+
+      body.categoryId = foundCategory.id;
+    }
+
+    // ২. স্কিমার টাইপ ও ভ্যালু সুরক্ষিত করা
+    if (body.pricePerDay !== undefined) {
+      body.pricePerDay = Number(body.pricePerDay);
+    }
+    if (body.stockQuantity !== undefined) {
+      body.stockQuantity = Number(body.stockQuantity);
+    } else {
+      body.stockQuantity = 1;
+    }
+    if (!body.brand) {
+      body.brand = "General";
+    }
+
+    // ৩. নিরাপদভাবে Zod ভ্যালিডেশন চালানো
+    let validatedData: any;
+    try {
+      validatedData = gearSchema.parse(body);
+    } catch (valErr: any) {
+      // যদি Zod কোনো নির্দিষ্ট ফিল্ডের জন্য আটকে যায়, তবে বিস্তারিত মেসেজ দেবে
+      return res.status(400).json({
+        success: false,
+        message: "Validation Error: Please check all required fields",
+        errors: valErr.errors || valErr.message,
+      });
+    }
+
+    const { categoryId, images, category, ...rest } = validatedData as any;
+    const finalImages = sanitizeImages(images || body.images);
+
+    // ৪. Prisma-তে গিয়ার তৈরি করা
+    const gear = await prisma.gearItem.create({
+      data: {
+        ...rest,
+        images: finalImages.length > 0 ? finalImages : ["https://placehold.co/600x400?text=No+Image"],
+        provider: {
+          connect: { id: user.id },
+        },
         category: {
-          connect: { id: categoryId },
-        },
-      }),
-    },
-    include: {
-      category: true,
-      provider: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
+          connect: { id: categoryId || body.categoryId },
         },
       },
-    },
-  });
+      include: {
+        category: true,
+        provider: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
 
-  return res.status(201).json({
-    success: true,
-    message: "Gear item created successfully!",
-    data: gear,
-  });
+    return res.status(201).json({
+      success: true,
+      message: "Gear item created successfully!",
+      data: gear,
+    });
+  } catch (error: any) {
+    console.error("❌ Error in createGear:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to create gear",
+    });
+  }
 };
 
 // 5. Update Gear
