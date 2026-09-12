@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Role } from "@prisma/client";
 import {
   getMyGears,
+  createGear,
   updateGear,
   deleteGear,
 } from "../controllers/gear.controller";
@@ -24,6 +25,9 @@ router.use(restrictTo(Role.provider, "provider" as any));
 // প্রোভাইডারের সব গিয়ার ফেচ করা
 router.get("/gear", getMyGears);
 
+// নতুন গিয়ার তালিকাভুক্ত করা (POST /api/provider/gear)
+router.post("/gear", createGear); // 👈 ২. এই নতুন রুটটি যোগ করা হলো
+
 // গিয়ার স্টক বা যেকোনো ফিল্ড আপডেট (PATCH & PUT উভয়টিই সাপোর্ট করবে)
 router.patch("/gear/:id", updateGear);
 router.put("/gear/:id", updateGear);
@@ -35,10 +39,7 @@ router.delete("/gear/:id", deleteGear);
 // 2. Order Management Routes (/api/provider/orders)
 // ==========================================
 
-// প্রোভাইডারের সব রেন্টাল অর্ডার ফেচ করা
 router.get("/orders", getProviderOrders);
-
-// অর্ডারের স্ট্যাটাস আপডেট (যেমন: CONFIRMED, PICKED_UP, COMPLETED ইত্যাদি)
 router.patch("/orders/:id", updateOrder);
 
 export default router;
