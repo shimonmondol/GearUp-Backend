@@ -1,7 +1,19 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import { gearSchema } from "../validations/auth.validation";
 import { AppError } from "../utils/AppError";
+
+// TypeScript Interface: ইনপুট ডেটার নিরাপদ টাইপ
+interface CreateGearPayload {
+  title: string;
+  description: string;
+  pricePerDay: number | string;
+  category?: string;
+  categoryId?: string;
+  brand?: string;
+  stockQuantity?: number | string;
+  images?: string[];
+  isAvailable?: boolean;
+}
 
 // ইমেজ ক্লিন ও ভ্যালিডেট করার হেল্পার ফাংশন
 const sanitizeImages = (imagesInput: any): string[] => {
@@ -136,33 +148,57 @@ export const getGearById = async (req: Request, res: Response) => {
   });
 };
 
-// 4. Create Gear (Fixed Validation & Category Auto-resolution)
+// 4. Create Gear (Zod বাদ দিয়ে পিওর TypeScript ভ্যালিডেশন)
 export const createGear = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const providerId = user?.id || user?.userId || user?._id;
 
     if (!providerId) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Unauthorized! User ID missing." });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized! User ID missing in token.",
+      });
     }
 
-    const body = { ...req.body };
+    const body: CreateGearPayload = req.body || {};
 
-    // ১. ফ্রন্টএন্ড থেকে category নাম আসলে সেটির UUID বের করা বা নতুন তৈরি করা
-    if (!body.categoryId && body.category) {
-      const categoryName = String(body.category).trim();
+    // ক) পিওর TypeScript ভ্যালিডেশন লজিক
+    const errors: string[] = [];
+
+    if (!body.title || typeof body.title !== "string" || !body.title.trim()) {
+      errors.push("Gear title is required.");
+    }
+
+    if (!body.description || typeof body.description !== "string" || !body.description.trim()) {
+      errors.push("Gear description is required.");
+    }
+
+    const price = Number(body.pricePerDay);
+    if (isNaN(price) || price <= 0) {
+      errors.push("Price per day must be a valid positive number.");
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: errors[0],
+        errors,
+      });
+    }
+
+    // খ) ক্যাটাগরি আইডি বের বা স্বয়ংক্রিয়ভাবে তৈরি করা
+    let targetCategoryId = body.categoryId;
+
+    if (!targetCategoryId) {
+      const categoryName = (body.category || "General").trim();
+      const slug = categoryName.toLowerCase().replace(/\s+/g, "-");
+
       let foundCat = await prisma.category.findFirst({
         where: {
           OR: [
             { name: { equals: categoryName, mode: "insensitive" } },
-            {
-              slug: {
-                equals: categoryName.toLowerCase().replace(/\s+/g, "-"),
-                mode: "insensitive",
-              },
-            },
+            { slug: { equals: slug, mode: "insensitive" } },
           ],
         },
       });
@@ -171,53 +207,47 @@ export const createGear = async (req: Request, res: Response) => {
         foundCat = await prisma.category.create({
           data: {
             name: categoryName,
-            slug: categoryName.toLowerCase().replace(/\s+/g, "-"),
+            slug,
           },
         });
       }
 
-      // 👈 Zod স্কিমার জন্য categoryId বাধ্যতামূলক ফিল্ড পূরণ করা হলো
-      body.categoryId = foundCat.id;
+      targetCategoryId = foundCat.id;
     }
 
-    // ২. সংখ্যা কনভার্ট ও ডিফল্ট মান
-    body.pricePerDay = Number(body.pricePerDay);
-    body.stockQuantity = Number(body.stockQuantity) || 1;
-    body.brand = body.brand ? String(body.brand).trim() : "General";
+    // গ) ইমেজ স্যানিটাইজেশন
+    const finalImages = sanitizeImages(body.images);
+    const imagesToStore =
+      finalImages.length > 0
+        ? finalImages
+        : ["https://placehold.co/600x400?text=Gear+Image"];
 
-    // ৩. নিরাপদভাবে ভ্যালিডেশন এবং পরিষ্কার এরর মেসেজ রিটার্ন
-    let validatedData: any;
-    try {
-      validatedData = gearSchema.parse(body);
-    } catch (zodErr: any) {
-      console.error("❌ Zod Validation Error:", zodErr.errors);
-      return res.status(400).json({
-        success: false,
-        message: zodErr.errors?.[0]?.message || "Invalid input data",
-        validationDetails: zodErr.errors || zodErr,
-      });
-    }
-
-    const { categoryId, images, category, ...rest } = validatedData;
-    const finalImages = sanitizeImages(images || body.images);
-
-    // ৪. Prisma-তে গিয়ার তৈরি করা
+    // ঘ) Prisma-তে গিয়ার তৈরি করা
     const gear = await prisma.gearItem.create({
       data: {
-        ...rest,
-        images:
-          finalImages.length > 0
-            ? finalImages
-            : ["https://placehold.co/600x400?text=No+Image"],
+        title: body.title.trim(),
+        description: body.description.trim(),
+        brand: (body.brand || "General").trim(),
+        pricePerDay: price,
+        stockQuantity: Math.max(1, Number(body.stockQuantity) || 1),
+        isAvailable: body.isAvailable !== undefined ? Boolean(body.isAvailable) : true,
+        images: imagesToStore,
         provider: {
           connect: { id: String(providerId) },
         },
         category: {
-          connect: { id: String(categoryId || body.categoryId) },
+          connect: { id: String(targetCategoryId) },
         },
       },
       include: {
         category: true,
+        provider: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     });
 
@@ -227,11 +257,10 @@ export const createGear = async (req: Request, res: Response) => {
       data: gear,
     });
   } catch (error: any) {
-    console.error("❌ Prisma or Runtime Error in createGear:", error);
-    return res.status(error.statusCode || 400).json({
+    console.error("❌ Error in createGear:", error);
+    return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to create gear listing",
-      errorDetails: error.meta || null,
     });
   }
 };
