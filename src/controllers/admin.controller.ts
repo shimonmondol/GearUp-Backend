@@ -2,24 +2,24 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { AppError } from "../utils/AppError";
 
-// ১. অ্যাডমিন গ্লোবাল স্ট্যাটস
 export const getAdminStats = async (req: Request, res: Response) => {
   try {
-    const [totalUsers, activeGear, totalRentals, revenueData] = await Promise.all([
-      prisma.user.count(),
-      prisma.gearItem.count({ where: { isAvailable: true } }),
-      prisma.rentalOrder.count(),
-      prisma.rentalOrder.aggregate({
-        _sum: { totalPrice: true },
-        where: { status: "PAID" },
-      }),
-    ]);
+    const [totalUsers, totalGear, totalRentals, revenueData] =
+      await Promise.all([
+        prisma.user.count(),
+        prisma.gearItem.count(),
+        prisma.rentalOrder.count(),
+        prisma.rentalOrder.aggregate({
+          _sum: { totalPrice: true },
+          where: { status: "PAID" },
+        }),
+      ]);
 
     return res.json({
       success: true,
       data: {
         totalUsers,
-        activeGear,
+        totalGear,
         totalRentals,
         totalRevenue: revenueData._sum.totalPrice || 0,
       },
@@ -122,15 +122,28 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
   }
 };
 
-// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (মডারেশন ভিউ)
+// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (Active / All ফিল্টারসহ)
 export const getAllPlatformGears = async (req: Request, res: Response) => {
   try {
-    const { search = "", page = "1", limit = "10" } = req.query;
+    const {
+      search = "",
+      availability = "",
+      page = "1",
+      limit = "10",
+    } = req.query;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const take = Math.max(1, parseInt(limit as string, 10) || 10);
     const skip = (pageNum - 1) * take;
 
     const where: any = {};
+
+    // 🎯 Active / Inactive ফিল্টারিং লজিক
+    if (availability === "active") {
+      where.isAvailable = true;
+    } else if (availability === "inactive") {
+      where.isAvailable = false;
+    }
+
     if (search && String(search).trim()) {
       where.OR = [
         { title: { contains: String(search).trim(), mode: "insensitive" } },
@@ -185,7 +198,10 @@ export const adminDeleteGear = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     // Foreign key constraint থাকলে ইনঅ্যাক্টিভ করে দেওয়া
-    if (error.code === "P2003" || error.message?.includes("foreign key constraint")) {
+    if (
+      error.code === "P2003" ||
+      error.message?.includes("foreign key constraint")
+    ) {
       await prisma.gearItem.update({
         where: { id: String(req.params.id) },
         data: { isAvailable: false, stockQuantity: 0 },
