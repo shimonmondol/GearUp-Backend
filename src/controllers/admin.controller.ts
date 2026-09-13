@@ -122,3 +122,80 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (মডারেশন ভিউ)
+export const getAllPlatformGears = async (req: Request, res: Response) => {
+  try {
+    const { search = "", page = "1", limit = "10" } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const take = Math.max(1, parseInt(limit as string, 10) || 10);
+    const skip = (pageNum - 1) * take;
+
+    const where: any = {};
+    if (search && String(search).trim()) {
+      where.OR = [
+        { title: { contains: String(search).trim(), mode: "insensitive" } },
+        { brand: { contains: String(search).trim(), mode: "insensitive" } },
+      ];
+    }
+
+    const [gears, total] = await Promise.all([
+      prisma.gearItem.findMany({
+        where,
+        include: {
+          category: true,
+          provider: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      prisma.gearItem.count({ where }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        gears,
+        pagination: {
+          total,
+          page: pageNum,
+          totalPages: Math.ceil(total / take),
+        },
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ৫. অ্যাডমিন সরাসরি যেকোনো গিয়ার মুছে ফেলা
+export const adminDeleteGear = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.gearItem.delete({
+      where: { id: String(id) },
+    });
+
+    return res.json({
+      success: true,
+      message: "Listing permanently removed by admin.",
+    });
+  } catch (error: any) {
+    // Foreign key constraint থাকলে ইনঅ্যাক্টিভ করে দেওয়া
+    if (error.code === "P2003" || error.message?.includes("foreign key constraint")) {
+      await prisma.gearItem.update({
+        where: { id: String(req.params.id) },
+        data: { isAvailable: false, stockQuantity: 0 },
+      });
+      return res.json({
+        success: true,
+        message: "Active bookings exist. Listing has been marked unavailable.",
+      });
+    }
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
