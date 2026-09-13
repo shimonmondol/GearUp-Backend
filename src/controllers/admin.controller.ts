@@ -33,15 +33,15 @@ export const getAdminStats = async (req: Request, res: Response) => {
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
     const { search = "", page = "1", limit = "10" } = req.query;
-    const pageNum = Math.max(1, parseInt(search as string, 10) || Number(page));
-    const take = Math.max(1, parseInt(limit as string, 10));
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const take = Math.max(1, parseInt(limit as string, 10) || 10);
     const skip = (pageNum - 1) * take;
 
     const where: any = {};
-    if (search) {
+    if (search && String(search).trim()) {
       where.OR = [
-        { name: { contains: String(search), mode: "insensitive" } },
-        { email: { contains: String(search), mode: "insensitive" } },
+        { name: { contains: String(search).trim(), mode: "insensitive" } },
+        { email: { contains: String(search).trim(), mode: "insensitive" } },
       ];
     }
 
@@ -53,7 +53,8 @@ export const getAllUsers = async (req: Request, res: Response) => {
           name: true,
           email: true,
           role: true,
-          isBlocked: true,
+          status: true,
+          isActive: true,
           createdAt: true,
         },
         orderBy: { createdAt: "desc" },
@@ -83,17 +84,38 @@ export const getAllUsers = async (req: Request, res: Response) => {
 export const toggleUserStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { isBlocked } = req.body;
+    const { status, isActive, isBlocked } = req.body;
+
+    const updatePayload: any = {};
+
+    // স্ট্যাটাস ও অ্যাক্টিভেশনের মান সেট করা
+    if (status !== undefined) {
+      updatePayload.status = status;
+    } else if (isBlocked !== undefined) {
+      updatePayload.status = isBlocked ? "SUSPENDED" : "ACTIVE";
+    }
+
+    if (isActive !== undefined) {
+      updatePayload.isActive = Boolean(isActive);
+    } else if (isBlocked !== undefined) {
+      updatePayload.isActive = !Boolean(isBlocked);
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id: String(id) },
-      data: { isBlocked: Boolean(isBlocked) },
-      select: { id: true, name: true, email: true, isBlocked: true },
+      data: updatePayload,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        status: true,
+        isActive: true,
+      },
     });
 
     return res.json({
       success: true,
-      message: `User status updated to ${updatedUser.isBlocked ? "Suspended" : "Active"}`,
+      message: `User status updated successfully`,
       data: updatedUser,
     });
   } catch (error: any) {
