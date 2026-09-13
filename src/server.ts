@@ -9,7 +9,8 @@ import orderRouter from "./routes/order.route";
 import rentalRoutes from "./routes/rental.routes";
 import reviewRouter from "./routes/review.route";
 import paymentRouter from "./routes/payment.routes";
-import providerRouter from "./routes/provider.routes"; // 👈 ১. নতুন রাউটার ইম্পোর্ট
+import providerRouter from "./routes/provider.routes";
+import adminRoutes from "./routes/admin.routes";
 import { globalErrorHandler } from "./middlewares/error.middleware";
 
 dotenv.config();
@@ -32,7 +33,8 @@ app.use("/api/orders", orderRouter);
 app.use("/api/rentals", rentalRoutes);
 app.use("/api/reviews", reviewRouter);
 app.use("/api/payments", paymentRouter);
-app.use("/api/provider", providerRouter); // 👈 ২. এখানে মাউন্ট করুন
+app.use("/api/provider", providerRouter);
+app.use("/api/admin", adminRoutes);
 app.use(globalErrorHandler);
 
 const PORT: number | string = process.env.PORT || 5000;
