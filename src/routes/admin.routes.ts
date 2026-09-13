@@ -5,6 +5,7 @@ import {
   toggleUserStatus,
   getAllPlatformGears,
   adminDeleteGear,
+  getAllPlatformOrders,
 } from "../controllers/admin.controller";
 import { protect, restrictTo } from "../middlewares/auth.middleware";
 import { Role } from "@prisma/client";
@@ -21,5 +22,6 @@ router.get("/users", getAllUsers);
 router.get("/gears", getAllPlatformGears);
 router.delete("/gears/:id", adminDeleteGear);
 router.patch("/users/:id", toggleUserStatus);
+router.get("/orders", getAllPlatformOrders);
 
 export default router;

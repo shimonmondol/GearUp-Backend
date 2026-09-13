@@ -88,7 +88,6 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
 
     const updatePayload: any = {};
 
-    // স্ট্যাটাস ও অ্যাক্টিভেশনের মান সেট করা
     if (status !== undefined) {
       updatePayload.status = status;
     } else if (isBlocked !== undefined) {
@@ -123,7 +122,7 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
   }
 };
 
-// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (মডারেশন ভিউ)
+// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (মডারেশন ভিউ)
 export const getAllPlatformGears = async (req: Request, res: Response) => {
   try {
     const { search = "", page = "1", limit = "10" } = req.query;
@@ -171,7 +170,7 @@ export const getAllPlatformGears = async (req: Request, res: Response) => {
   }
 };
 
-// ৫. অ্যাডমিন সরাসরি যেকোনো গিয়ার মুছে ফেলা
+// ৫. অ্যাডমিন সরাসরি যেকোনো গিয়ার মুছে ফেলা
 export const adminDeleteGear = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -185,7 +184,7 @@ export const adminDeleteGear = async (req: Request, res: Response) => {
       message: "Listing permanently removed by admin.",
     });
   } catch (error: any) {
-    // Foreign key constraint থাকলে ইনঅ্যাক্টিভ করে দেওয়া
+    // Foreign key constraint থাকলে ইনঅ্যাক্টিভ করে দেওয়া
     if (error.code === "P2003" || error.message?.includes("foreign key constraint")) {
       await prisma.gearItem.update({
         where: { id: String(req.params.id) },
@@ -196,6 +195,69 @@ export const adminDeleteGear = async (req: Request, res: Response) => {
         message: "Active bookings exist. Listing has been marked unavailable.",
       });
     }
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ৬. প্ল্যাটফর্মের সকল রেন্টাল অর্ডার ও ট্রানজাকশন মনিটরিং
+export const getAllPlatformOrders = async (req: Request, res: Response) => {
+  try {
+    const { search = "", status = "", page = "1", limit = "10" } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const take = Math.max(1, parseInt(limit as string, 10) || 10);
+    const skip = (pageNum - 1) * take;
+
+    const where: any = {};
+
+    // স্ট্যাটাস ফিল্টারিং
+    if (status && String(status).trim()) {
+      where.status = String(status).trim().toUpperCase();
+    }
+
+    // কাস্টমার নাম, ইমেইল বা অর্ডার আইডি দিয়ে সার্চ
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      where.OR = [
+        { id: { contains: q, mode: "insensitive" } },
+        { customer: { name: { contains: q, mode: "insensitive" } } },
+        { customer: { email: { contains: q, mode: "insensitive" } } },
+      ];
+    }
+
+    const [orders, total] = await Promise.all([
+      prisma.rentalOrder.findMany({
+        where,
+        include: {
+          customer: {
+            select: { id: true, name: true, email: true },
+          },
+          orderItems: {
+            include: {
+              gear: {
+                select: { id: true, title: true, pricePerDay: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      prisma.rentalOrder.count({ where }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        orders,
+        pagination: {
+          total,
+          page: pageNum,
+          totalPages: Math.ceil(total / take),
+        },
+      },
+    });
+  } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
