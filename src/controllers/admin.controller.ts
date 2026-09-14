@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import { AppError } from "../utils/AppError";
 
+// ১. অ্যাডমিন গ্লোবাল স্ট্যাটস
 export const getAdminStats = async (req: Request, res: Response) => {
   try {
     const [totalUsers, totalGear, totalRentals, revenueData] =
@@ -39,9 +39,10 @@ export const getAllUsers = async (req: Request, res: Response) => {
 
     const where: any = {};
     if (search && String(search).trim()) {
+      const q = String(search).trim();
       where.OR = [
-        { name: { contains: String(search).trim(), mode: "insensitive" } },
-        { email: { contains: String(search).trim(), mode: "insensitive" } },
+        { name: { contains: q, mode: "insensitive" } },
+        { email: { contains: q, mode: "insensitive" } },
       ];
     }
 
@@ -80,29 +81,48 @@ export const getAllUsers = async (req: Request, res: Response) => {
   }
 };
 
-// ৩. ইউজার সাসপেন্ড বা অ্যাক্টিভেট করা
+// ৩. ইউজার সাসপেন্ড বা অ্যাক্টিভেট করা (Prisma schema: active / suspended)
 export const toggleUserStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, isActive, isBlocked } = req.body;
 
-    const updatePayload: any = {};
+    const existingUser = await prisma.user.findUnique({
+      where: { id: String(id) },
+      select: { id: true, status: true, isActive: true },
+    });
 
-    if (status !== undefined) {
-      updatePayload.status = status;
-    } else if (isBlocked !== undefined) {
-      updatePayload.status = isBlocked ? "SUSPENDED" : "ACTIVE";
+    if (!existingUser) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
+    // বর্তমান স্ট্যাটাস পরীক্ষা করে পরবর্তী স্ট্যাটাস নির্ধারণ
+    let willSuspend: boolean;
     if (isActive !== undefined) {
-      updatePayload.isActive = Boolean(isActive);
+      willSuspend = !Boolean(isActive);
     } else if (isBlocked !== undefined) {
-      updatePayload.isActive = !Boolean(isBlocked);
+      willSuspend = Boolean(isBlocked);
+    } else if (status !== undefined) {
+      willSuspend = String(status).toLowerCase() === "suspended";
+    } else {
+      const isCurrentlySuspended =
+        String(existingUser.status).toLowerCase() === "suspended" ||
+        existingUser.isActive === false;
+      willSuspend = !isCurrentlySuspended;
     }
+
+    // schema-র enum অনুযায়ী ছোট হাতের active / suspended
+    const nextStatus = willSuspend ? "suspended" : "active";
+    const nextIsActive = !willSuspend;
 
     const updatedUser = await prisma.user.update({
       where: { id: String(id) },
-      data: updatePayload,
+      data: {
+        status: nextStatus as any,
+        isActive: nextIsActive,
+      },
       select: {
         id: true,
         name: true,
@@ -114,7 +134,7 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      message: `User status updated successfully`,
+      message: `User account ${willSuspend ? "suspended" : "activated"} successfully`,
       data: updatedUser,
     });
   } catch (error: any) {
@@ -122,7 +142,7 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
   }
 };
 
-// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (Active / All ফিল্টারসহ)
+// ৪. প্ল্যাটফর্মের সকল গিয়ার ফেচ (Active / All ফিল্টার এবং প্রোভাইডার সার্চসহ)
 export const getAllPlatformGears = async (req: Request, res: Response) => {
   try {
     const {
@@ -137,7 +157,6 @@ export const getAllPlatformGears = async (req: Request, res: Response) => {
 
     const where: any = {};
 
-    // 🎯 Active / Inactive ফিল্টারিং লজিক
     if (availability === "active") {
       where.isAvailable = true;
     } else if (availability === "inactive") {
@@ -145,9 +164,12 @@ export const getAllPlatformGears = async (req: Request, res: Response) => {
     }
 
     if (search && String(search).trim()) {
+      const q = String(search).trim();
       where.OR = [
-        { title: { contains: String(search).trim(), mode: "insensitive" } },
-        { brand: { contains: String(search).trim(), mode: "insensitive" } },
+        { title: { contains: q, mode: "insensitive" } },
+        { brand: { contains: q, mode: "insensitive" } },
+        { provider: { name: { contains: q, mode: "insensitive" } } },
+        { provider: { email: { contains: q, mode: "insensitive" } } },
       ];
     }
 
@@ -197,7 +219,6 @@ export const adminDeleteGear = async (req: Request, res: Response) => {
       message: "Listing permanently removed by admin.",
     });
   } catch (error: any) {
-    // Foreign key constraint থাকলে ইনঅ্যাক্টিভ করে দেওয়া
     if (
       error.code === "P2003" ||
       error.message?.includes("foreign key constraint")
@@ -225,12 +246,10 @@ export const getAllPlatformOrders = async (req: Request, res: Response) => {
 
     const where: any = {};
 
-    // স্ট্যাটাস ফিল্টারিং
     if (status && String(status).trim()) {
       where.status = String(status).trim().toUpperCase();
     }
 
-    // কাস্টমার নাম, ইমেইল বা অর্ডার আইডি দিয়ে সার্চ
     if (search && String(search).trim()) {
       const q = String(search).trim();
       where.OR = [
@@ -272,6 +291,56 @@ export const getAllPlatformOrders = async (req: Request, res: Response) => {
           totalPages: Math.ceil(total / take),
         },
       },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ৭. অ্যাডমিন সরাসরি যেকোনো অর্ডার বাতিল ও স্টক রিস্টোর করা
+export const adminCancelOrder = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const order = await prisma.rentalOrder.findUnique({
+      where: { id: String(id) },
+      include: { orderItems: true },
+    });
+
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    if (order.status === "CANCELLED") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Order is already cancelled" });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.rentalOrder.update({
+        where: { id: String(id) },
+        data: { status: "CANCELLED" },
+      });
+
+      if (order.status !== "RETURNED") {
+        for (const item of order.orderItems) {
+          await tx.gearItem.update({
+            where: { id: item.gearId },
+            data: {
+              stockQuantity: { increment: 1 },
+              isAvailable: true,
+            },
+          });
+        }
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: "Order cancelled and gear stock restored successfully.",
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
